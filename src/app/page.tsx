@@ -177,6 +177,12 @@ export default function Home() {
           comparison: data.comparison,
         });
         setActiveStep(4);
+        // Set the folder name so PDFs can be loaded
+        if (data.folder_name) {
+          setSelectedFolder(data.folder_name);
+        }
+        // Refresh folders list to show the new folder
+        await fetchFolders();
         setUploadSuccess(
           `Successfully processed ${selectedFiles.length} file(s)! Extraction complete.`
         );
