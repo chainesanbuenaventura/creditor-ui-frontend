@@ -112,9 +112,11 @@ export default function Home() {
       if (!API_URL || API_URL === "http://localhost:8001") {
         console.warn("API_URL not configured. Please set NEXT_PUBLIC_API_URL environment variable.");
       }
-      const res = await fetch(`${API_URL}/folders`);
+      // Remove trailing slash from API_URL if present
+      const apiUrl = API_URL.endsWith('/') ? API_URL.slice(0, -1) : API_URL;
+      const res = await fetch(`${apiUrl}/folders`);
       if (!res.ok) {
-        throw new Error(`Failed to fetch folders: ${res.statusText}`);
+        throw new Error(`Failed to fetch folders: ${res.statusText} (${res.status})`);
       }
       const data = await res.json();
       setFolders(data.folders);
@@ -122,8 +124,8 @@ export default function Home() {
     } catch (err) {
       console.error("Failed to fetch folders:", err);
       const errorMessage = err instanceof Error ? err.message : "Failed to connect to backend";
-      if (errorMessage.includes("Failed to fetch") || errorMessage.includes("NetworkError")) {
-        setUploadError(`Cannot connect to backend at ${API_URL}. Make sure: 1) Backend is deployed and running, 2) NEXT_PUBLIC_API_URL is set correctly in Vercel.`);
+      if (errorMessage.includes("Failed to fetch") || errorMessage.includes("NetworkError") || errorMessage.includes("TypeError")) {
+        setUploadError(`Cannot connect to backend at ${API_URL}. Make sure: 1) Backend is deployed and running, 2) NEXT_PUBLIC_API_URL is set correctly in Vercel, 3) CORS_ORIGINS includes your frontend URL.`);
       } else {
         setUploadError(errorMessage);
       }
@@ -198,17 +200,35 @@ export default function Home() {
     setLoading(true);
     setResult(null);
     setActiveStep(0);
+    setUploadError(null);
 
     try {
       // Step 1-4: Run comparison (includes extraction)
-      const res = await fetch(`${API_URL}/compare/${folderName}`, {
+      const apiUrl = API_URL.endsWith('/') ? API_URL.slice(0, -1) : API_URL;
+      const res = await fetch(`${apiUrl}/compare/${folderName}`, {
         method: "POST",
       });
+      
+      if (!res.ok) {
+        if (res.status === 504 || res.status === 408) {
+          throw new Error("Extraction timed out. Vercel free tier has a 10-second limit. OCR + extraction can take 30-60+ seconds. Consider using Railway instead (no timeout limits).");
+        }
+        const errorText = await res.text();
+        throw new Error(`Extraction failed: ${res.statusText} (${res.status}) - ${errorText}`);
+      }
+      
       const data = await res.json();
       setResult(data);
       setActiveStep(4);
     } catch (err) {
       console.error("Extraction failed:", err);
+      const errorMessage = err instanceof Error ? err.message : "Extraction failed";
+      setUploadError(errorMessage);
+      
+      // Show timeout warning
+      if (errorMessage.includes("timeout") || errorMessage.includes("504")) {
+        setUploadError("⏱️ Extraction timed out! Vercel free tier limits functions to 10 seconds. OCR + extraction takes 30-60+ seconds. Solution: Use Railway (no timeout limits) - see RAILWAY_QUICK_SETUP.md");
+      }
     } finally {
       setLoading(false);
     }
