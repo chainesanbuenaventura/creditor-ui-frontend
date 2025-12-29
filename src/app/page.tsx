@@ -102,6 +102,13 @@ export default function Home() {
 
   const fetchFolders = async () => {
     try {
+      // Check if we're on Vercel and API_URL is not configured
+      const isVercel = typeof window !== "undefined" && window.location.hostname.includes("vercel.app");
+      if (isVercel && (!API_URL || API_URL === "http://localhost:8001")) {
+        setUploadError("Backend not configured. Please set NEXT_PUBLIC_API_URL in Vercel environment variables. See VERCEL_SETUP.md for instructions.");
+        return;
+      }
+      
       if (!API_URL || API_URL === "http://localhost:8001") {
         console.warn("API_URL not configured. Please set NEXT_PUBLIC_API_URL environment variable.");
       }
@@ -111,9 +118,15 @@ export default function Home() {
       }
       const data = await res.json();
       setFolders(data.folders);
+      setUploadError(null); // Clear error on success
     } catch (err) {
       console.error("Failed to fetch folders:", err);
-      setUploadError(err instanceof Error ? err.message : "Failed to connect to backend. Make sure NEXT_PUBLIC_API_URL is set correctly.");
+      const errorMessage = err instanceof Error ? err.message : "Failed to connect to backend";
+      if (errorMessage.includes("Failed to fetch") || errorMessage.includes("NetworkError")) {
+        setUploadError(`Cannot connect to backend at ${API_URL}. Make sure: 1) Backend is deployed and running, 2) NEXT_PUBLIC_API_URL is set correctly in Vercel.`);
+      } else {
+        setUploadError(errorMessage);
+      }
     }
   };
 
