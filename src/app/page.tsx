@@ -16,6 +16,8 @@ import {
   Layers,
   Brain,
   Scale,
+  Upload,
+  RefreshCw,
 } from "lucide-react";
 import PDFViewer from "@/components/PDFViewer";
 import ComparisonTable from "@/components/ComparisonTable";
@@ -89,6 +91,10 @@ export default function Home() {
   const [expandedDocs, setExpandedDocs] = useState<Set<string>>(new Set());
   const [selectedDoc, setSelectedDoc] = useState<string | null>(null);
   const [viewStep, setViewStep] = useState<number>(1);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
 
   useEffect(() => {
     fetchFolders();
@@ -96,12 +102,83 @@ export default function Home() {
 
   const fetchFolders = async () => {
     try {
+      if (!API_URL || API_URL === "http://localhost:8001") {
+        console.warn("API_URL not configured. Please set NEXT_PUBLIC_API_URL environment variable.");
+      }
       const res = await fetch(`${API_URL}/folders`);
+      if (!res.ok) {
+        throw new Error(`Failed to fetch folders: ${res.statusText}`);
+      }
       const data = await res.json();
       setFolders(data.folders);
     } catch (err) {
       console.error("Failed to fetch folders:", err);
+      setUploadError(err instanceof Error ? err.message : "Failed to connect to backend. Make sure NEXT_PUBLIC_API_URL is set correctly.");
     }
+  };
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (files && files.length > 0) {
+      setSelectedFiles(Array.from(files));
+      setUploadError(null);
+      setUploadSuccess(null);
+    }
+  };
+
+  const handleFileUpload = async () => {
+    if (selectedFiles.length === 0) return;
+
+    setUploading(true);
+    setUploadError(null);
+    setUploadSuccess(null);
+
+    try {
+      const formData = new FormData();
+      selectedFiles.forEach((file) => {
+        formData.append("files", file);
+      });
+
+      const res = await fetch(`${API_URL}/upload`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Upload failed: ${res.statusText} - ${errorText}`);
+      }
+
+      const data = await res.json();
+      const hasGroundTruth = selectedFiles.some(
+        (f) => f.name.toLowerCase() === "creditors_list.pdf"
+      );
+      
+      setUploadSuccess(
+        `Successfully uploaded ${data.count} file(s) to folder "${data.folder_name}"${
+          hasGroundTruth ? " (includes ground truth)" : ""
+        }`
+      );
+      
+      // Refresh folders list
+      await fetchFolders();
+      // Select the newly uploaded folder
+      setSelectedFolder(data.folder_name);
+      
+      // Clear selection
+      setSelectedFiles([]);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed");
+      console.error("Upload error:", err);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedFiles([]);
+    setUploadError(null);
+    setUploadSuccess(null);
   };
 
   const runExtraction = async (folderName: string) => {
@@ -187,30 +264,130 @@ export default function Home() {
         {/* Sidebar - Folder Selection */}
         <aside className="col-span-3">
           <div className="bg-[var(--card-bg)] rounded-xl border border-[var(--border)] p-4">
-            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              <FolderOpen className="w-5 h-5 text-accent-400" />
-              Folders
-            </h2>
-            <div className="space-y-2">
-              {folders.map((folder) => (
-                <button
-                  key={folder.name}
-                  onClick={() => setSelectedFolder(folder.name)}
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <FolderOpen className="w-5 h-5 text-accent-400" />
+                Folders
+              </h2>
+              <button
+                onClick={fetchFolders}
+                className="p-2 hover:bg-[#1a1a1a] rounded-lg transition-colors"
+                title="Refresh folders"
+              >
+                <RefreshCw className="w-4 h-4 text-gray-400" />
+              </button>
+            </div>
+
+            {/* Upload Section */}
+            <div className="mb-4 p-3 bg-[#1a1a1a] rounded-lg border border-[var(--border)]">
+              <div className="mb-2 text-xs text-gray-400">
+                Upload all PDFs together (including <code className="text-accent-400">creditors_list.pdf</code> for ground truth)
+              </div>
+              
+              {selectedFiles.length === 0 ? (
+                <label className="block cursor-pointer">
+                  <input
+                    type="file"
+                    multiple
+                    accept=".pdf"
+                    onChange={handleFileSelect}
+                    disabled={uploading}
+                    className="hidden"
+                  />
+                  <div className="flex items-center justify-center gap-2 py-2 px-3 bg-accent-400/20 hover:bg-accent-400/30 border border-accent-400/50 rounded-lg transition-all text-sm font-medium">
+                    <Upload className="w-4 h-4" />
+                    Select PDFs
+                  </div>
+                </label>
+              ) : (
+                <div className="space-y-2">
+                  <div className="text-xs text-gray-300 font-medium">
+                    {selectedFiles.length} file(s) selected:
+                  </div>
+                  <div className="max-h-32 overflow-y-auto space-y-1">
+                    {selectedFiles.map((file, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between p-2 bg-[#222] rounded text-xs"
+                      >
+                        <span className="truncate flex-1">
+                          {file.name === "creditors_list.pdf" ? (
+                            <span className="text-green-400 font-medium">
+                              {file.name} ✓ GT
+                            </span>
+                          ) : (
+                            file.name
+                          )}
+                        </span>
+                        <span className="text-gray-500 ml-2">
+                          {(file.size / 1024 / 1024).toFixed(2)} MB
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleFileUpload}
+                      disabled={uploading}
+                      className="flex-1 py-2 px-3 bg-accent-400 hover:bg-accent-500 disabled:bg-gray-600 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-all text-black"
+                    >
+                      {uploading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Uploading...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-4 h-4" />
+                          Upload
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={clearSelection}
+                      disabled={uploading}
+                      className="py-2 px-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-600 rounded-lg text-sm transition-all"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              )}
+              
+              {uploadError && (
+                <div className="mt-2 text-xs text-red-400">{uploadError}</div>
+              )}
+              {uploadSuccess && (
+                <div className="mt-2 text-xs text-green-400">{uploadSuccess}</div>
+              )}
+            </div>
+
+            <div className="space-y-2 max-h-[400px] overflow-y-auto">
+              {folders.length === 0 ? (
+                <div className="text-sm text-gray-500 text-center py-4">
+                  No folders found. Upload PDFs to get started.
+                </div>
+              ) : (
+                folders.map((folder) => (
+                  <button
+                    key={folder.name}
+                    onClick={() => setSelectedFolder(folder.name)}
                     className={`w-full text-left p-3 rounded-lg border transition-all ${
                       selectedFolder === folder.name
                         ? "bg-accent-400/20 border-accent-400/50"
                         : "bg-[#1a1a1a] border-[var(--border)] hover:border-accent-400/30"
                     }`}
-                >
-                  <div className="font-medium">{folder.name}</div>
-                  <div className="text-sm text-gray-400">
-                    {folder.pdf_count} PDFs
-                    {folder.has_ground_truth && (
-                      <span className="ml-2 text-green-400">✓ GT</span>
-                    )}
-                  </div>
-                </button>
-              ))}
+                  >
+                    <div className="font-medium">{folder.name}</div>
+                    <div className="text-sm text-gray-400">
+                      {folder.pdf_count} PDFs
+                      {folder.has_ground_truth && (
+                        <span className="ml-2 text-green-400">✓ GT</span>
+                      )}
+                    </div>
+                  </button>
+                ))
+              )}
             </div>
 
             {selectedFolder && (
