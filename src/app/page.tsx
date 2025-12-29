@@ -200,35 +200,17 @@ export default function Home() {
     setLoading(true);
     setResult(null);
     setActiveStep(0);
-    setUploadError(null);
 
     try {
       // Step 1-4: Run comparison (includes extraction)
-      const apiUrl = API_URL.endsWith('/') ? API_URL.slice(0, -1) : API_URL;
-      const res = await fetch(`${apiUrl}/compare/${folderName}`, {
+      const res = await fetch(`${API_URL}/compare/${folderName}`, {
         method: "POST",
       });
-      
-      if (!res.ok) {
-        if (res.status === 504 || res.status === 408) {
-          throw new Error("Extraction timed out. Vercel free tier has a 10-second limit. OCR + extraction can take 30-60+ seconds. Consider using Railway instead (no timeout limits).");
-        }
-        const errorText = await res.text();
-        throw new Error(`Extraction failed: ${res.statusText} (${res.status}) - ${errorText}`);
-      }
-      
       const data = await res.json();
       setResult(data);
       setActiveStep(4);
     } catch (err) {
       console.error("Extraction failed:", err);
-      const errorMessage = err instanceof Error ? err.message : "Extraction failed";
-      setUploadError(errorMessage);
-      
-      // Show timeout warning
-      if (errorMessage.includes("timeout") || errorMessage.includes("504")) {
-        setUploadError("⏱️ Extraction timed out! Vercel free tier limits functions to 10 seconds. OCR + extraction takes 30-60+ seconds. Solution: Use Railway (no timeout limits) - see RAILWAY_QUICK_SETUP.md");
-      }
     } finally {
       setLoading(false);
     }
