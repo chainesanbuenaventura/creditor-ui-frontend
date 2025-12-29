@@ -141,12 +141,13 @@ export default function Home() {
     }
   };
 
-  const handleFileUpload = async () => {
+  const handleFileUpload = async (processImmediately: boolean = false) => {
     if (selectedFiles.length === 0) return;
 
     setUploading(true);
     setUploadError(null);
     setUploadSuccess(null);
+    setLoading(processImmediately); // Show loading if processing
 
     try {
       const formData = new FormData();
@@ -154,7 +155,9 @@ export default function Home() {
         formData.append("files", file);
       });
 
-      const res = await fetch(`${API_URL}/upload`, {
+      // Use upload-and-process endpoint for Vercel (processes in same request)
+      const endpoint = processImmediately ? "/upload-and-process" : "/upload";
+      const res = await fetch(`${API_URL}${endpoint}`, {
         method: "POST",
         body: formData,
       });
@@ -165,20 +168,35 @@ export default function Home() {
       }
 
       const data = await res.json();
-      const hasGroundTruth = selectedFiles.some(
-        (f) => f.name.toLowerCase() === "creditors_list.pdf"
-      );
       
-      setUploadSuccess(
-        `Successfully uploaded ${data.count} file(s) to folder "${data.folder_name}"${
-          hasGroundTruth ? " (includes ground truth)" : ""
-        }`
-      );
-      
-      // Refresh folders list
-      await fetchFolders();
-      // Select the newly uploaded folder
-      setSelectedFolder(data.folder_name);
+      if (processImmediately && data.extraction) {
+        // Processing completed - set results
+        setResult({
+          extraction: data.extraction,
+          ground_truth: data.ground_truth || [],
+          comparison: data.comparison,
+        });
+        setActiveStep(4);
+        setUploadSuccess(
+          `Successfully processed ${selectedFiles.length} file(s)! Extraction complete.`
+        );
+      } else {
+        // Just uploaded
+        const hasGroundTruth = selectedFiles.some(
+          (f) => f.name.toLowerCase() === "creditors_list.pdf"
+        );
+        
+        setUploadSuccess(
+          `Successfully uploaded ${data.count} file(s) to folder "${data.folder_name}"${
+            hasGroundTruth ? " (includes ground truth)" : ""
+          }`
+        );
+        
+        // Refresh folders list
+        await fetchFolders();
+        // Select the newly uploaded folder
+        setSelectedFolder(data.folder_name);
+      }
       
       // Clear selection
       setSelectedFiles([]);
@@ -187,6 +205,7 @@ export default function Home() {
       console.error("Upload error:", err);
     } finally {
       setUploading(false);
+      setLoading(false);
     }
   };
 
@@ -340,31 +359,37 @@ export default function Home() {
                       </div>
                     ))}
                   </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleFileUpload}
-                      disabled={uploading}
-                      className="flex-1 py-2 px-3 bg-accent-400 hover:bg-accent-500 disabled:bg-gray-600 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-all text-black"
-                    >
-                      {uploading ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Uploading...
-                        </>
-                      ) : (
-                        <>
-                          <Upload className="w-4 h-4" />
-                          Upload
-                        </>
-                      )}
-                    </button>
-                    <button
-                      onClick={clearSelection}
-                      disabled={uploading}
-                      className="py-2 px-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-600 rounded-lg text-sm transition-all"
-                    >
-                      Clear
-                    </button>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleFileUpload(true)}
+                        disabled={uploading || loading}
+                        className="flex-1 py-2 px-3 bg-accent-400 hover:bg-accent-500 disabled:bg-gray-600 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-all text-black"
+                        title="Upload and process immediately (works on Vercel - processes in one request)"
+                      >
+                        {uploading || loading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Processing...
+                          </>
+                        ) : (
+                          <>
+                            <Play className="w-4 h-4" />
+                            Upload & Process
+                          </>
+                        )}
+                      </button>
+                      <button
+                        onClick={clearSelection}
+                        disabled={uploading || loading}
+                        className="py-2 px-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-600 rounded-lg text-sm transition-all"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    <div className="text-xs text-gray-500 text-center">
+                      💡 "Upload & Process" works on Vercel (processes in one request, files persist during processing)
+                    </div>
                   </div>
                 </div>
               )}
